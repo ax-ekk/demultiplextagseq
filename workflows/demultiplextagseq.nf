@@ -3,13 +3,14 @@
     IMPORT MODULES / SUBWORKFLOWS / FUNCTIONS
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 */
-include { FASTQC                 } from '../modules/nf-core/fastqc/main'
+include { UMITOOLS_EXTRACT       } from '../modules/nf-core/umitools/extract/main'
+include { FQTK                   } from '../modules/nf-core/fqtk/main'
+include { FASTQC; FASTQC as FASTQC_POST } from '../modules/nf-core/fastqc/main' 
 include { MULTIQC                } from '../modules/nf-core/multiqc/main'
 include { paramsSummaryMap       } from 'plugin/nf-schema'
 include { paramsSummaryMultiqc   } from '../subworkflows/nf-core/utils_nfcore_pipeline'
 include { softwareVersionsToYAML } from '../subworkflows/nf-core/utils_nfcore_pipeline'
 include { methodsDescriptionText } from '../subworkflows/local/utils_nfcore_demultiplextagseq_pipeline'
-
 /*
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     RUN MAIN WORKFLOW
@@ -19,7 +20,8 @@ include { methodsDescriptionText } from '../subworkflows/local/utils_nfcore_demu
 workflow DEMULTIPLEXTAGSEQ {
 
     take:
-    ch_samplesheet // channel: samplesheet read in from --input
+    ch_samplesheet // channel: samplesheet read in from --input,
+    
     main:
 
     ch_versions = Channel.empty()
@@ -32,7 +34,32 @@ workflow DEMULTIPLEXTAGSEQ {
     )
     ch_multiqc_files = ch_multiqc_files.mix(FASTQC.out.zip.collect{it[1]})
     ch_versions = ch_versions.mix(FASTQC.out.versions.first())
-
+    //
+    // MODULE: Extract UMI
+    //
+    UMITOOLS_EXTRACT (
+        ch_samplesheet
+    )
+    ch_multiqc_files = ch_multiqc_files.mix(UMITOOLS_EXTRACT.out.log.collect{it[1]})
+    ch_versions = ch_versions.mix(UMITOOLS_EXTRACT.out.versions.first())
+    //
+    // MODULE: demultiplexing
+    //
+    FQTK (
+        UMITOOLS_EXTRACT.out.reads
+    ) 
+    ch_multiqc_files = ch_multiqc_files.mix(FQTK.out.metrics.map { meta, metrics -> return metrics} )
+    ch_versions = ch_versions.mix(FQTK.out.versions.first())  
+    // 
+    // MODULE: Run FastQC on demultiplexed reads
+    // 
+    FASTQC_POST (
+        FQTK.out.sample_fastq.transpose().map { meta, fastq 
+        -> def baseName = fastq.name.split('\\.')[0] 
+        def namedTuple = [id: baseName, single_end: true ] 
+        return tuple (namedTuple,fastq)}
+    )
+    ch_multiqc_files = ch_multiqc_files.mix(FASTQC_POST.out.zip.collect{it[1]})
     //
     // Collate and save software versions
     //
@@ -43,8 +70,6 @@ workflow DEMULTIPLEXTAGSEQ {
             sort: true,
             newLine: true
         ).set { ch_collated_versions }
-
-
     //
     // MODULE: MultiQC
     //
@@ -83,6 +108,7 @@ workflow DEMULTIPLEXTAGSEQ {
         ch_multiqc_logo.toList(),
         [],
         []
+        
     )
 
     emit:multiqc_report = MULTIQC.out.report.toList() // channel: /path/to/multiqc_report.html
