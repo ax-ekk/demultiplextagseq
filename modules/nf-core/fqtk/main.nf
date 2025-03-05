@@ -37,7 +37,7 @@ process FQTK {
         demux \\
             --inputs ${fastqs} \\
             --read-structures 100T 7B93T \\
-            --output output/ \\
+            --output ${prefix}_output/ \\
             --sample-metadata ${baseDir}/assets/barcodes.tab \\
             ${args}
     cat <<-END_VERSIONS > versions.yml
