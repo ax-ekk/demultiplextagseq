@@ -14,9 +14,9 @@ process FQTK {
 
     output:
     // Demultiplexed file name changes depending on the arg '--output-types'
-    tuple val(meta), path('output/*R1.fq.gz')                       , emit: sample_fastq
-    tuple val(meta), path('output/demux-metrics.txt')               , emit: metrics
-    tuple val(meta), path('output/unmatched*.fq.gz')                , emit: most_frequent_unmatched
+    tuple val(meta), path('*output/*R1.fq.gz')                       , emit: sample_fastq
+    tuple val(meta), path('*output/demux-metrics.txt')               , emit: metrics
+    tuple val(meta), path('*output/unmatched*.fq.gz')                , emit: most_frequent_unmatched
     path "versions.yml"                                             , emit: versions
 
 
@@ -37,7 +37,7 @@ process FQTK {
         demux \\
             --inputs ${fastqs} \\
             --read-structures 100T 7B93T \\
-            --output output/ \\
+            --output ${prefix}_output/ \\
             --sample-metadata ${baseDir}/assets/barcodes.tab \\
             ${args}
     cat <<-END_VERSIONS > versions.yml
