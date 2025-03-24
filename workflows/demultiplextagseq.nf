@@ -17,6 +17,22 @@ include { methodsDescriptionText } from '../subworkflows/local/utils_nfcore_demu
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 */
 
+// my process to combibe the umi extracted fastq files
+process combine_fastq {
+    input :
+    tuple val(meta), path(read)
+
+    output:
+    tuple val(meta), path("${meta.id}*.fastq.gz"), emit: reads
+
+    script:
+    """
+    cat *extract_1.fastq.gz > ${meta.id}_1.fastq.gz
+    cat *extract_2.fastq.gz > ${meta.id}_2.fastq.gz
+    """
+}
+
+
 workflow DEMULTIPLEXTAGSEQ {
 
     take:
@@ -35,37 +51,82 @@ workflow DEMULTIPLEXTAGSEQ {
     ch_multiqc_files = ch_multiqc_files.mix(FASTQC.out.zip.map{ meta, zip -> return tuple(meta.id,zip[0],zip[1]) })    
     ch_versions = ch_versions.mix(FASTQC.out.versions.first())
     //
+    // Split the fastq files if parameter is set
+    //
+    if (params.split_fastq) {
+        fq_split = ch_samplesheet.map { meta, reads -> 
+                return tuple(meta, reads[0], reads[1]) 
+        }
+            .splitFastq(pe: true, by: params.split_size, file: true)
+                .map { meta, read1, read2->
+                    return tuple([id: meta.id + "_" + read1.baseName, single_end: meta.single_end],
+                        [read1, read2])
+                }
+    } else {
+      fq_split = ch_samplesheet
+    }  
+    //
     // MODULE: Extract UMI
     //
     UMITOOLS_EXTRACT (
-        ch_samplesheet
+        fq_split
     )
-    ch_multiqc_files = ch_multiqc_files.join(UMITOOLS_EXTRACT.out.log.map { meta, log -> return tuple(meta.id, log)})
     ch_versions = ch_versions.mix(UMITOOLS_EXTRACT.out.versions.first())
+    //
+    // Combine the umi extracted fastq files
+    //
+    if (params.split_fastq) {
+        ch_multiqc_files = ch_multiqc_files.join(UMITOOLS_EXTRACT.out.log.map { meta, log -> return tuple(meta.id.take(meta.id.lastIndexOf('_')), log)}.groupTuple().map { its -> return its.flatten()})
+        UMITOOLS_EXTRACT.out.reads.map{ meta, file -> 
+            return tuple( [id: meta.id.take(meta.id.lastIndexOf('.')), single_en: meta.single_end], file)}
+            .set{ reads }
+
+        reads = reads.groupTuple().map { meta, reads -> return tuple(meta, reads.flatten())}
+        combine_fastq(
+        reads
+        )
+        combine_fastq = combine_fastq.out.reads
+    
+    } else {
+         combine_fastq = UMITOOLS_EXTRACT.out.reads
+         ch_multiqc_files = ch_multiqc_files.join(UMITOOLS_EXTRACT.out.log.map { meta, log -> return tuple(meta.id, log)})
+    }
+    
     //
     // MODULE: demultiplexing
     //
     FQTK (
-        UMITOOLS_EXTRACT.out.reads
-    ) 
-    ch_multiqc_files = ch_multiqc_files.join(FQTK.out.metrics.map { meta, metrics -> return tuple(meta.id, metrics)} )
+        combine_fastq
+    )
+    if (params.split_fastq) {
+        ch_multiqc_files = ch_multiqc_files.join(FQTK.out.metrics.map { meta, metrics -> return tuple(meta.id.take(meta.id.lastIndexOf('_')), metrics)})
+    } else {
+        ch_multiqc_files = ch_multiqc_files.join(FQTK.out.metrics.map { meta, metrics -> return tuple(meta.id, metrics)})
+    }
     ch_versions = ch_versions.mix(FQTK.out.versions.first())  
+
     // 
     // MODULE: Run FastQC on demultiplexed reads
     // 
+    FQTK.out.sample_fastq.transpose().map { meta, fastq 
+       -> def namedTuple = [id: meta.id, single_end: true ] 
+        return tuple (namedTuple,fastq)}
+
+    
     FASTQC_POST (
-        FQTK.out.sample_fastq.transpose().map { meta, fastq 
+        FQTK.out.sample_fastq.transpose().map { meta, fastq
         -> def baseName = fastq.name.split('\\.')[0] 
         def namedTuple = [id: meta.id+"_"+baseName, single_end: true ] 
         return tuple (namedTuple,fastq)}
     )
+
     // name using multiplex id (sample) to match with rest of multiqc files (one multiqc report per multiplex)
     post_fastqcs =  FASTQC_POST.out.zip.map { meta, zip 
     -> def sample = meta.id.split('_')[0]+"_PAIRED_END"
     return tuple(sample, zip)}
-
-    ch_multiqc_files = post_fastqcs.groupTuple().map{ id  -> return id.flatten()}.combine(ch_multiqc_files,by:0).map{id -> return tuple(id[0],id[1..-1])}
     
+    ch_multiqc_files = post_fastqcs.groupTuple().map{ id  -> return id.flatten()}.combine(ch_multiqc_files,by:0).map{id -> return tuple(id[0],id[1..-1])}
+    //
     // Collate and save software versions
     //
     softwareVersionsToYAML(ch_versions)
@@ -115,6 +176,7 @@ workflow DEMULTIPLEXTAGSEQ {
        []
         
     )
+
 
     emit: multiqc_report = MULTIQC.out.report.toList() // channel: /path/to/multiqc_report.html
     versions       = ch_versions                 // channel: [ path(versions.yml) ]
