@@ -42,6 +42,7 @@ workflow DEMULTIPLEXTAGSEQ {
 
     ch_versions = Channel.empty()
     ch_multiqc_files = Channel.empty()
+    
     //
     // MODULE: Run FastQC
     //
@@ -50,16 +51,18 @@ workflow DEMULTIPLEXTAGSEQ {
     )
     ch_multiqc_files = ch_multiqc_files.mix(FASTQC.out.zip.map{ meta, zip -> return tuple(meta.id,zip[0],zip[1]) })    
     ch_versions = ch_versions.mix(FASTQC.out.versions.first())
+    
     //
     // Split the fastq files if parameter is set
     //
+    // map to get meta and read1, read2. Split, then add the split id to the meta id and remap. 
     if (params.split_fastq) {
         fq_split = ch_samplesheet.map { meta, reads -> 
                 return tuple(meta, reads[0], reads[1]) 
         }
             .splitFastq(pe: true, by: params.split_size, file: true)
                 .map { meta, read1, read2->
-                    return tuple([id: meta.id + "_" + read1.baseName, single_end: meta.single_end],
+                    return tuple([id: meta.id + "_" + read1.baseName[-1], single_end: meta.single_end],
                         [read1, read2])
                 }
     } else {
@@ -72,47 +75,37 @@ workflow DEMULTIPLEXTAGSEQ {
         fq_split
     )
     ch_versions = ch_versions.mix(UMITOOLS_EXTRACT.out.versions.first())
+    
     //
     // Combine the umi extracted fastq files
     //
     if (params.split_fastq) {
         ch_multiqc_files = ch_multiqc_files.join(UMITOOLS_EXTRACT.out.log.map { meta, log -> return tuple(meta.id.take(meta.id.lastIndexOf('_')), log)}.groupTuple().map { its -> return its.flatten()})
         UMITOOLS_EXTRACT.out.reads.map{ meta, file -> 
-            return tuple( [id: meta.id.take(meta.id.lastIndexOf('.')), single_en: meta.single_end], file)}
+            return tuple( [id: meta.id.take(meta.id.lastIndexOf('_')), single_en: meta.single_end], file)}
             .set{ reads }
-
         reads = reads.groupTuple().map { meta, reads -> return tuple(meta, reads.flatten())}
         combine_fastq(
         reads
         )
         combine_fastq = combine_fastq.out.reads
-    
-    } else {
+   } else {
          combine_fastq = UMITOOLS_EXTRACT.out.reads
-         ch_multiqc_files = ch_multiqc_files.join(UMITOOLS_EXTRACT.out.log.map { meta, log -> return tuple(meta.id, log)})
+      ch_multiqc_files = ch_multiqc_files.join(UMITOOLS_EXTRACT.out.log.map { meta, log -> return tuple(meta.id, log)})
     }
-    
+
     //
     // MODULE: demultiplexing
     //
     FQTK (
         combine_fastq
     )
-    if (params.split_fastq) {
-        ch_multiqc_files = ch_multiqc_files.join(FQTK.out.metrics.map { meta, metrics -> return tuple(meta.id.take(meta.id.lastIndexOf('_')), metrics)})
-    } else {
-        ch_multiqc_files = ch_multiqc_files.join(FQTK.out.metrics.map { meta, metrics -> return tuple(meta.id, metrics)})
-    }
+    ch_multiqc_files = ch_multiqc_files.join(FQTK.out.metrics.map { meta, metrics -> return tuple(meta.id, metrics)})
     ch_versions = ch_versions.mix(FQTK.out.versions.first())  
 
-    // 
-    // MODULE: Run FastQC on demultiplexed reads
-    // 
-    FQTK.out.sample_fastq.transpose().map { meta, fastq 
-       -> def namedTuple = [id: meta.id, single_end: true ] 
-        return tuple (namedTuple,fastq)}
-
-    
+    //
+    // MODULE: Run FastQC on the demultiplexed fastq files
+    //
     FASTQC_POST (
         FQTK.out.sample_fastq.transpose().map { meta, fastq
         -> def baseName = fastq.name.split('\\.')[0] 
@@ -124,11 +117,13 @@ workflow DEMULTIPLEXTAGSEQ {
     post_fastqcs =  FASTQC_POST.out.zip.map { meta, zip 
     -> def sample = meta.id.split('_')[0]+"_PAIRED_END"
     return tuple(sample, zip)}
-    
+     
     ch_multiqc_files = post_fastqcs.groupTuple().map{ id  -> return id.flatten()}.combine(ch_multiqc_files,by:0).map{id -> return tuple(id[0],id[1..-1])}
+    
     //
     // Collate and save software versions
     //
+
     softwareVersionsToYAML(ch_versions)
         .collectFile(
             storeDir: "${params.outdir}/pipeline_info",
@@ -136,6 +131,7 @@ workflow DEMULTIPLEXTAGSEQ {
             sort: true,
             newLine: true
         ).set { ch_collated_versions }
+
     //
     // MODULE: MultiQC
     //
@@ -147,9 +143,6 @@ workflow DEMULTIPLEXTAGSEQ {
     ch_multiqc_logo          = params.multiqc_logo ?
         Channel.fromPath(params.multiqc_logo, checkIfExists: true) :
         Channel.empty()
-
-
-
 
     summary_params      = paramsSummaryMap(
         workflow, parameters_schema: "nextflow_schema.json")
@@ -177,7 +170,7 @@ workflow DEMULTIPLEXTAGSEQ {
         ch_multiqc_custom_config.toList(),
         ch_multiqc_logo.toList(),
         [],
-       []
+        []
         
     )
 
@@ -186,7 +179,6 @@ workflow DEMULTIPLEXTAGSEQ {
     versions       = ch_versions                 // channel: [ path(versions.yml) ]
 
 }
-
 /*
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     THE END
