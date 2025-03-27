@@ -24,11 +24,27 @@ process combine_fastq {
 
     output:
     tuple val(meta), path("${meta.id}*.fastq.gz"), emit: reads
+   
 
     script:
     """
     cat *extract_1.fastq.gz > ${meta.id}_1.fastq.gz
     cat *extract_2.fastq.gz > ${meta.id}_2.fastq.gz
+    """
+}
+
+process plot_plates {
+    module  "build-env/f2022:r/4.2.0-foss-2021b"
+
+    input:
+    tuple val(meta), path(fastqc_dir)
+    
+    output:
+    tuple val(meta), path("*.png"), emit: plate_png
+    path("sessionInfo.txt"),                       emit: version
+    script:
+    """
+    Rscript $projectDir/bin/plate_plots.R  
     """
 }
 
@@ -120,6 +136,12 @@ workflow DEMULTIPLEXTAGSEQ {
      
     ch_multiqc_files = post_fastqcs.groupTuple().map{ id  -> return id.flatten()}.combine(ch_multiqc_files,by:0).map{id -> return tuple(id[0],id[1..-1])}
     
+    plot_plates(
+         post_fastqcs.groupTuple()
+    )
+plot_plates.out.plate_png.view()
+   ch_multiqc_files = ch_multiqc_files.join(plot_plates.out.plate_png).map{ id, files, plots -> return tuple(id, files+[plots])}
+    //ch_multiqc_files.view()
     //
     // Collate and save software versions
     //
