@@ -7,9 +7,10 @@ library("ggplate")
 library("RColorBrewer")
 library("cowplot")
 
-# Parse command line arguments
-#args <- commandArgs(trailingOnly = TRUE)
-#qc.dir <-"/scratch-cbe/users/elin.axelsson/TagSeq/work/1b/4cf6cc3e3b69ce5d955f374182de4a/"
+#Parse command line arguments
+args <- commandArgs(trailingOnly = TRUE)
+id <- args[1]
+qc.dir <-"/scratch-cbe/users/elin.axelsson/TagSeq/work/1b/4cf6cc3e3b69ce5d955f374182de4a/"
 qc.dir <- "./"
 qc <- qc_aggregate(qc.dir)
 qc <- qc %>% filter(str_detect(sample, "[A-H][0-9]+")) %>% select(sample, tot.seq, pct.gc, pct.dup) %>% distinct()
@@ -85,8 +86,8 @@ p4 <- plate_plot(
   
 )
 options(bitmapType='cairo')
-
-png("Plate_QC_mqc.png", width = 1200, height = 1000)
+dir.create(file.path(id))
+png(paste(id,"Plate_QC_mqc.png",sep="/"), width = 1200, height = 1000)
 plot_grid(p1, p2, p3, p4, ncol = 2, nrow = 2,greedy = FALSE)
 dev.off()
                    

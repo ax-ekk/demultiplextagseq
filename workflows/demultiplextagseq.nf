@@ -40,11 +40,11 @@ process plot_plates {
     tuple val(meta), path(fastqc_dir)
     
     output:
-    tuple val(meta), path("*.png"), emit: plate_png
+    tuple val(meta), path("$meta/*.png"), emit: plate_png
     path("sessionInfo.txt"),                       emit: version
     script:
     """
-    Rscript $projectDir/bin/plate_plots.R  
+    Rscript $projectDir/bin/plate_plots.R  ${meta}
     """
 }
 
