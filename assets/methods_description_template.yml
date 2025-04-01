@@ -1,6 +1,6 @@
-id: "berger_group-demultiplextagseq-methods-description"
+id: "demultiplextagseq-methods-description"
 description: "Suggested text and references to use when describing pipeline usage within the methods section of a publication."
-section_name: "berger_group/demultiplextagseq Methods Description"
+section_name: "demultiplextagseq Methods Description"
 section_href: "https://"
 plot_type: "html"
 ## TODO nf-core: Update the HTML below to your preferred methods description, e.g. add publication citation for this pipeline
