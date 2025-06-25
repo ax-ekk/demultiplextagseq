@@ -78,12 +78,14 @@ workflow DEMULTIPLEXTAGSEQ {
         }
             .splitFastq(pe: true, by: params.split_size, file: true)
                 .map { meta, read1, read2->
-                    return tuple([id: meta.id + "_" + read1.baseName[-1], single_end: meta.single_end],
+                    return tuple([id: meta.id + "_" + read1.baseName.split('\\.').last(), single_end: meta.single_end],
                         [read1, read2])
                 }
     } else {
       fq_split = ch_samplesheet
-    }  
+    } 
+
+    //fq_split.view() 
     //
     // MODULE: Extract UMI
     //
